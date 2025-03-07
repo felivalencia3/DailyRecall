@@ -109,6 +109,7 @@ function ControlTray({
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.srcObject = activeVideoStream;
+      console.log("Set video srcObject:", activeVideoStream ? "active stream" : "null");
     }
 
     let timeoutId = -1;
@@ -117,26 +118,54 @@ function ControlTray({
       const video = videoRef.current;
       const canvas = renderCanvasRef.current;
 
-      if (!video || !canvas) {
+      if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+        console.log("Cannot send video frame - missing video element or dimensions");
+        if (connected && activeVideoStream) {
+          // Try again in a moment if we're connected but can't get the frame yet
+          timeoutId = window.setTimeout(sendVideoFrame, 500);
+        }
         return;
       }
 
-      const ctx = canvas.getContext("2d")!;
-      canvas.width = video.videoWidth * 0.25;
-      canvas.height = video.videoHeight * 0.25;
-      if (canvas.width + canvas.height > 0) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const base64 = canvas.toDataURL("image/jpeg", 1.0);
-        const data = base64.slice(base64.indexOf(",") + 1, Infinity);
-        client.sendRealtimeInput([{ mimeType: "image/jpeg", data }]);
+      try {
+        // Use a larger size for better visibility
+        const ctx = canvas.getContext("2d", { alpha: false })!;
+        canvas.width = video.videoWidth * 0.5;
+        canvas.height = video.videoHeight * 0.5;
+        
+        if (canvas.width > 0 && canvas.height > 0) {
+          // Clear the canvas first
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw the video frame
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Convert to JPEG with high quality
+          const base64 = canvas.toDataURL("image/jpeg", 0.9);
+          const data = base64.slice(base64.indexOf(",") + 1, Infinity);
+          
+          console.log(`Sending video frame: ${canvas.width}x${canvas.height}`);
+          client.sendRealtimeInput([{ mimeType: "image/jpeg", data }]);
+        } else {
+          console.warn("Canvas has invalid dimensions", { width: canvas.width, height: canvas.height });
+        }
+      } catch (error) {
+        console.error("Error sending video frame:", error);
       }
-      if (connected) {
-        timeoutId = window.setTimeout(sendVideoFrame, 1000 / 0.5);
+      
+      if (connected && activeVideoStream) {
+        // Send frames at 2 frames per second
+        timeoutId = window.setTimeout(sendVideoFrame, 500);
       }
     }
+    
     if (connected && activeVideoStream !== null) {
-      requestAnimationFrame(sendVideoFrame);
+      console.log("Starting to send video frames to API");
+      // Wait a short moment to ensure video is properly initialized
+      setTimeout(sendVideoFrame, 1000);
     }
+    
     return () => {
       clearTimeout(timeoutId);
     };
@@ -144,16 +173,37 @@ function ControlTray({
 
   //handler for swapping from one video-stream to the next
   const changeStreams = (next?: UseMediaStreamResult) => async () => {
-    if (next) {
-      const mediaStream = await next.start();
-      setActiveVideoStream(mediaStream);
-      onVideoStreamChange(mediaStream);
-    } else {
-      setActiveVideoStream(null);
-      onVideoStreamChange(null);
+    try {
+      // Stop all current streams first
+      videoStreams.filter((msr) => msr !== next).forEach((msr) => msr.stop());
+      
+      if (next) {
+        console.log(`Starting ${next.type} stream`);
+        const mediaStream = await next.start();
+        console.log(`${next.type} stream started successfully`);
+        
+        // Set the active stream
+        setActiveVideoStream(mediaStream);
+        onVideoStreamChange(mediaStream);
+        
+        // Ensure video element gets updated
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+          console.log("Video element srcObject set directly");
+        }
+      } else {
+        console.log("Stopping all streams");
+        setActiveVideoStream(null);
+        onVideoStreamChange(null);
+        
+        // Clear video element
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
+      }
+    } catch (error) {
+      console.error("Error changing streams:", error);
     }
-
-    videoStreams.filter((msr) => msr !== next).forEach((msr) => msr.stop());
   };
 
   return (

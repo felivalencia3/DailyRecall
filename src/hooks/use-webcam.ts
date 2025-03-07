@@ -41,12 +41,26 @@ export function useWebcam(): UseMediaStreamResult {
   }, [stream]);
 
   const start = async () => {
-    const mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-    });
-    setStream(mediaStream);
-    setIsStreaming(true);
-    return mediaStream;
+    try {
+      console.log("Requesting webcam access...");
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user"
+        },
+      });
+      
+      console.log("Webcam access granted");
+      console.log("Video tracks:", mediaStream.getVideoTracks().map(t => `${t.label} (${t.readyState})`));
+      
+      setStream(mediaStream);
+      setIsStreaming(true);
+      return mediaStream;
+    } catch (error) {
+      console.error("Error starting webcam:", error);
+      throw error;
+    }
   };
 
   const stop = () => {

@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import "./App.scss";
 import { LiveAPIProvider } from "./contexts/LiveAPIContext";
 import SidePanel from "./components/side-panel/SidePanel";
 import { Altair } from "./components/altair/Altair";
 import ControlTray from "./components/control-tray/ControlTray";
+import { ActivityDetector } from "./components/activity-detector/ActivityDetector";
 import cn from "classnames";
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY as string;
@@ -36,6 +37,13 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   // either the screen capture, the video or null, if null we hide it
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
+  // track if camera is active
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  
+  // Update camera active state when video stream changes
+  useEffect(() => {
+    setIsCameraActive(videoStream !== null);
+  }, [videoStream]);
 
   return (
     <div className="App">
@@ -45,15 +53,26 @@ function App() {
           <main>
             <div className="main-app-area">
               {/* APP goes here */}
-              <Altair />
-              <video
-                className={cn("stream", {
-                  hidden: !videoRef.current || !videoStream,
-                })}
-                ref={videoRef}
-                autoPlay
-                playsInline
-              />
+              <div className="video-container">
+                <video
+                  className={cn("stream", {
+                    hidden: !videoStream,
+                    active: videoStream
+                  })}
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{ display: videoStream ? 'block' : 'none' }}
+                />
+                {!videoStream && (
+                  <div className="camera-placeholder">
+                    <span className="material-symbols-outlined">videocam_off</span>
+                    <p>Camera is off</p>
+                  </div>
+                )}
+              </div>
+              <ActivityDetector isCameraActive={isCameraActive} />
             </div>
 
             <ControlTray

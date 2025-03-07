@@ -1,5 +1,6 @@
 :root {
-  --text: white;
+  --text: #333333;
+  --text-light: #ffffff;
   --gray-200: #b4b8bb;
   --gray-300: #80868b;
   --gray-500: #5f6368;
@@ -9,11 +10,15 @@
   --gray-900: #111111;
   --gray-1000: #0a0a0a;
   --border-stroke: #444444;
-  --accent-blue: rgb(161, 228, 242);
-  --accent-blue-active-bg: #001233;
-  --accent-blue-active: #98beff;
-  --accent-blue-headers: #448dff;
-  --accent-green: rgb(168, 218, 181);
+  --accent-blue: #1a73e8;
+  --accent-blue-light: #d2e3fc;
+  --accent-blue-active-bg: #e8f0fe;
+  --accent-blue-active: #1967d2;
+  --accent-blue-headers: #1a73e8;
+  --accent-green: #34a853;
+  
+  --background-light: #ffffff;
+  --background-contrast: #f1f3f4;
 
   --midnight-blue: rgb(0, 18, 51);
   --blue-30: #99beff;
@@ -148,9 +153,15 @@ body {
 
   .main-app-area {
     display: flex;
+    flex-direction: column;
     flex: 1;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    padding: 20px;
+    gap: 20px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
   }
 
   .function-call {
@@ -162,10 +173,64 @@ body {
   }
 }
 
+/* Video container */
+.video-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--Neutral-10);
+  border-radius: 12px;
+  border: 3px solid var(--accent-blue);
+  min-height: 320px;
+  max-height: 480px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Camera placeholder when camera is off */
+.camera-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  color: var(--gray-300);
+  
+  .material-symbols-outlined {
+    font-size: 48px;
+    margin-bottom: 16px;
+    color: var(--accent-blue);
+  }
+  
+  p {
+    font-size: 18px;
+    margin: 0;
+  }
+}
+
 /* video player */
 .stream {
-  flex-grow: 1;
-  max-width: 90%;
-  border-radius: 32px;
-  max-height: fit-content;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  max-height: 500px;
+  display: block !important;
+  z-index: 10;
+  background-color: var(--Neutral-10);
+  
+  &.active {
+    border: 3px solid var(--accent-blue);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  }
+  
+  &.hidden {
+    display: none !important;
+  }
 }
