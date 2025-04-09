@@ -3,9 +3,10 @@
  * Detects activities using Gemini 2.0 Flash and maintains a log of detected activities
  */
 import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
-import { useEffect, useState, memo } from "react";
+import { useEffect, useState, memo, FormEvent } from "react";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { ToolCall } from "../../multimodal-live-types";
+import { supabase, logActivity, getActivities, Activity as SupabaseActivity } from "../../lib/supabase";
 import "./activity-detector.scss";
 
 // Define the activities we want to detect
@@ -74,25 +75,38 @@ function ActivityDetectorComponent({ isCameraActive = false }: ActivityDetectorP
     // For other dates
     return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
-  // Load saved activities from localStorage on initial render
-  const [activities, setActivities] = useState<LoggedActivity[]>(() => {
-    const savedActivities = localStorage.getItem('dailyRecall_activities');
-    if (savedActivities) {
+  
+  // Load saved activities from Supabase on initial render
+  const [activities, setActivities] = useState<LoggedActivity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { client, setConfig } = useLiveAPIContext();
+
+  // Load activities from Supabase when component mounts
+  useEffect(() => {
+    async function loadActivities() {
       try {
-        // Parse the saved activities and convert string timestamps back to Date objects
-        const parsed = JSON.parse(savedActivities);
-        return parsed.map((activity: any) => ({
-          ...activity,
-          timestamp: new Date(activity.timestamp)
+        setIsLoading(true);
+        const supabaseActivities = await getActivities();
+        
+        // Convert Supabase activities to our LoggedActivity format
+        const formattedActivities = supabaseActivities.map(activity => ({
+          id: activity.id?.toString() || Date.now().toString(),
+          activity: activity.activity_type,
+          timestamp: new Date(activity.created_at || Date.now()),
+          confidence: 0.95, // Default confidence since we don't store it in Supabase
+          notes: activity.notes || undefined
         }));
+        
+        setActivities(formattedActivities);
       } catch (error) {
-        console.error('Error loading saved activities:', error);
-        return [];
+        console.error('Error loading activities from Supabase:', error);
+      } finally {
+        setIsLoading(false);
       }
     }
-    return [];
-  });
-  const { client, setConfig } = useLiveAPIContext();
+    
+    loadActivities();
+  }, []);
 
   useEffect(() => {
     // Configure the Gemini model with our custom system instructions
@@ -156,20 +170,20 @@ Remember that your conversational abilities are just as important as activity de
             notes: args.notes,
           };
           
-          setActivities(prev => {
-            const updatedActivities = [newActivity, ...prev];
-            // Save to localStorage whenever activities change
-            try {
-              localStorage.setItem('dailyRecall_activities', JSON.stringify(updatedActivities));
-            } catch (error) {
-              console.error('Error saving activities to localStorage:', error);
-            }
-            return updatedActivities;
+          // Store activity in Supabase
+          logActivity({
+            activity_type: args.activity,
+            notes: args.notes
+          }).then(data => {
+            console.log('Activity logged to Supabase:', data);
+          }).catch(error => {
+            console.error('Error logging activity to Supabase:', error);
           });
+          
+          setActivities(prev => [newActivity, ...prev]);
         } else {
           console.log(`Ignored low-confidence activity detection: ${args.activity} (${confidence})`);
         }
-        // Activity is now logged in the conditional block above
       }
       
       // Send response for the tool call
@@ -193,6 +207,63 @@ Remember that your conversational abilities are just as important as activity de
     };
   }, [client]);
 
+  // State for manual activity logging form
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualActivity, setManualActivity] = useState<string>(ACTIVITIES[0]);
+  const [manualNotes, setManualNotes] = useState('');
+  
+  // Function to clear all activities
+  const clearActivities = async () => {
+    if (window.confirm('Are you sure you want to clear all activity logs?')) {
+      try {
+        // Delete all user's activities from Supabase
+        const { error } = await supabase
+          .from('activities')
+          .delete()
+          .neq('id', 0); // This will delete all records
+
+        if (error) throw error;
+        
+        // Clear the local state
+        setActivities([]);
+      } catch (error) {
+        console.error('Error clearing activities:', error);
+        alert('Failed to clear activities. Please try again.');
+      }
+    }
+  };
+
+  // Function to manually log an activity
+  const handleManualActivitySubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      // Log to Supabase
+      await logActivity({
+        activity_type: manualActivity,
+        notes: manualNotes.trim() || undefined
+      });
+      
+      // Add to local state
+      const newActivity: LoggedActivity = {
+        id: Date.now().toString(),
+        activity: manualActivity,
+        timestamp: new Date(),
+        confidence: 1.0, // Manual entries are 100% confidence
+        notes: manualNotes.trim() || undefined,
+      };
+      
+      setActivities(prev => [newActivity, ...prev]);
+      
+      // Reset form
+      setManualNotes('');
+      setShowManualForm(false);
+    } catch (error) {
+      console.error('Error manually logging activity:', error);
+      alert('Failed to log activity. Please try again.');
+    }
+  };
+
   return (
     <div className="activity-detector">
       <div className="activity-header">
@@ -201,41 +272,95 @@ Remember that your conversational abilities are just as important as activity de
           <div className={`camera-status ${isCameraActive ? 'active' : 'inactive'}`}>
             Camera: {isCameraActive ? 'Active' : 'Inactive'}
           </div>
-          {activities.length > 0 && (
+          <div className="header-buttons">
             <button 
-              className="clear-button" 
-              onClick={() => {
-                if (window.confirm('Are you sure you want to clear all activity logs?')) {
-                  setActivities([]);
-                  localStorage.removeItem('dailyRecall_activities');
-                }
-              }}
+              className="add-button" 
+              onClick={() => setShowManualForm(!showManualForm)}
+              aria-label="Manually log activity"
             >
-              Clear Log
+              {showManualForm ? 'Cancel' : 'Log Activity'}
             </button>
-          )}
+            {activities.length > 0 && (
+              <button 
+                className="clear-button" 
+                onClick={clearActivities}
+              >
+                Clear Log
+              </button>
+            )}
+          </div>
         </div>
       </div>
       
+      {/* Manual activity logging form */}
+      {showManualForm && (
+        <div className="manual-activity-form">
+          <form onSubmit={handleManualActivitySubmit}>
+            <div className="form-row">
+              <label htmlFor="activity-select">Activity:</label>
+              <select 
+                id="activity-select"
+                value={manualActivity}
+                onChange={(e) => setManualActivity(e.target.value)}
+                required
+              >
+                {ACTIVITIES.map(activity => (
+                  <option key={activity} value={activity}>
+                    {activity.charAt(0).toUpperCase() + activity.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="form-row">
+              <label htmlFor="activity-notes">Notes (optional):</label>
+              <input
+                id="activity-notes"
+                type="text"
+                value={manualNotes}
+                onChange={(e) => setManualNotes(e.target.value)}
+                placeholder="Add details about the activity"
+              />
+            </div>
+            
+            <div className="form-row form-buttons">
+              <button type="submit" className="submit-button">
+                Add to Log
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      
       <div className="activity-list">
-        {activities.length === 0 ? (
+        {isLoading ? (
+          <div className="loading-indicator">Loading activities...</div>
+        ) : activities.length === 0 ? (
           <div className="no-activities">
             <p>No activities detected yet.</p>
             <p>Turn on the camera and perform an activity.</p>
+            <p>Or use the "Log Activity" button to add manually.</p>
           </div>
         ) : (
-          activities.map((activity) => (
-            <div key={activity.id} className="activity-item">
-              <div className="activity-name">
-                <span className="activity-icon">✓</span>
-                {activity.activity.charAt(0).toUpperCase() + activity.activity.slice(1)}
-              </div>
-              <div className="activity-time">
-                {formatTimestamp(activity.timestamp)}
-              </div>
-              {activity.notes && <div className="activity-notes">{activity.notes}</div>}
-            </div>
-          ))
+          <ul>
+            {activities.map((activity) => (
+              <li key={activity.id} className={`activity-item ${activity.activity}`}>
+                <div className="activity-icon">
+                  {activity.activity === "eating" && <span className="material-symbols-outlined">restaurant</span>}
+                  {activity.activity === "drinking" && <span className="material-symbols-outlined">local_drink</span>}
+                  {activity.activity === "taking medication" && <span className="material-symbols-outlined">medication</span>}
+                </div>
+                <div className="activity-details">
+                  <h3 className="activity-name">
+                    {activity.activity.charAt(0).toUpperCase() + activity.activity.slice(1)}
+                    {activity.confidence === 1.0 && <span className="manual-tag">(Manual)</span>}
+                  </h3>
+                  <p className="activity-time">{formatTimestamp(activity.timestamp)}</p>
+                  {activity.notes && <p className="activity-notes">{activity.notes}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>
